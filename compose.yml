@@ -1,0 +1,29 @@
+services:
+  protecto_librechat_gateway:
+    image: protecto_librechat_gateway:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - .env
+    ports:
+      - "8000:8000"
+    environment:
+      LOG_FILE: /app/logs/protecto_gateway.log
+      MASK_TOOL_RESULTS: ${MASK_TOOL_RESULTS:-true}
+      NORMALIZE_TOOL_CALL_IDS: ${NORMALIZE_TOOL_CALL_IDS:-true}
+      LOG_SSE: ${LOG_SSE:-false}
+      BUFFER_TEXT_WHEN_TOOLS: ${BUFFER_TEXT_WHEN_TOOLS:-false}
+      ASYNC_MASK_THRESHOLD_KB: ${ASYNC_MASK_THRESHOLD_KB:-10}
+      ASYNC_MASK_POLL_SECONDS: ${ASYNC_MASK_POLL_SECONDS:-10}
+      ASYNC_MASK_MAX_RETRIES: ${ASYNC_MASK_MAX_RETRIES:-6}
+      ASYNC_MASK_SCALE_POLL_SECONDS: ${ASYNC_MASK_SCALE_POLL_SECONDS:-true}
+      ASYNC_MASK_SCALE_RETRIES: ${ASYNC_MASK_SCALE_RETRIES:-true}
+    volumes:
+      - gateway-logs:/app/logs
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  gateway-logs:

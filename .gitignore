@@ -1,0 +1,21 @@
+# Local compose override with real credentials filled in - never commit this
+compose.local.yml
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.venv/
+venv/
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+
+.claude
