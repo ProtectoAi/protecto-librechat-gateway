@@ -1,0 +1,75 @@
+# Remote/VM deployment: pulls a pre-built, published image (see DEPLOYMENT.md)
+# instead of building locally. Every gateway environment variable is inlined
+# below as an editable placeholder, so this one file plus a small .env for
+# the image reference is all a VM operator needs to touch.
+#
+# GATEWAY_IMAGE and GATEWAY_PORT still come from a small .env next to this
+# file (cp .env.remote.example .env, then set GATEWAY_IMAGE) - that keeps
+# the documented "bump the version, pull, recreate" upgrade flow in
+# README.md/DEPLOYMENT.md working without editing this file each release.
+#
+# Usage:
+#   cp .env.remote.example .env   # set GATEWAY_IMAGE there
+#   docker compose --file compose.remote.yml pull
+#   docker compose --file compose.remote.yml up --detach
+#   curl --fail http://127.0.0.1:8000/health
+
+services:
+  protecto_librechat_gateway:
+    image: ${GATEWAY_IMAGE:?Set GATEWAY_IMAGE in .env}
+    pull_policy: always
+    ports:
+      - "${GATEWAY_PORT:-8000}:8000"
+    environment:
+      # ── Required: Protecto connection ──────────────────────────────────
+      PROTECTO_URL: "https://protecto.example.com"
+      PROTECTO_MASTER_TOKEN: "replace-with-protecto-master-token"
+      PROTECTO_NAMESPACE: "librechat_namespace_vault"
+
+      # ── Required: model catalog (Provider:model, one-line JSON) ────────
+      GATEWAY_MODEL_PROVIDERS_MODELS: '{"OpenAI":["gpt-5.6-terra"],"Gemini":["gemini-3.5-flash"]}'
+
+      # ── Optional: gateway behavior (defaults shown) ─────────────────────
+      LOG_FILE: "/app/logs/protecto_gateway.log"
+      MASK_TOOL_RESULTS: "true"
+      NORMALIZE_TOOL_CALL_IDS: "true"
+      LOG_SSE: "false"
+      BUFFER_TEXT_WHEN_TOOLS: "false"
+
+      # ── Optional: asynchronous masking for large payloads (defaults) ───
+      ASYNC_MASK_THRESHOLD_KB: "10"
+      ASYNC_MASK_POLL_SECONDS: "10"
+      ASYNC_MASK_MAX_RETRIES: "6"
+      ASYNC_MASK_SCALE_POLL_SECONDS: "true"
+      ASYNC_MASK_SCALE_RETRIES: "true"
+
+      # ── Optional: LibreChat RAG embeddings (leave RAG_PROTECTO_USER_ID
+      #    empty to disable; set it to a stable identity to enable). The
+      #    OpenAI key used for embeddings comes from LibreChat's own
+      #    RAG_OPENAI_API_KEY request header, not a gateway env var. ──────
+      OPENAI_EMBEDDINGS_URL: "https://api.openai.com/v1/embeddings"
+      RAG_PROTECTO_USER_ID: ""
+
+      # ── Optional: local OCR, disabled by default. To enable: set
+      #    OCR_ENABLED=true and OCR_API_KEY to a generated 32+ byte key
+      #    (openssl rand -hex 32), matching the same key in LibreChat. ────
+      OCR_ENABLED: "false"
+      OCR_API_KEY: ""
+      OCR_LANGUAGES: "eng"
+      OCR_PDF_MODE: "auto"
+      OCR_MAX_FILE_MB: "20"
+      OCR_MAX_PAGES: "50"
+      OCR_TIMEOUT_SECONDS: "180"
+      OCR_MAX_CONCURRENT: "1"
+      OCR_MAX_IMAGE_PIXELS: "40000000"
+      OCR_RENDER_MAX_SIDE: "4000"
+      OCR_MAX_TEXT_CHARS: "2000000"
+      OCR_WORKER_MEMORY_MB: "1024"
+    volumes:
+      - gateway-logs:/app/logs
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  gateway-logs:

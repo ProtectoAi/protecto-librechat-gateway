@@ -1,0 +1,20 @@
+# Merge these sections into librechat.yaml; preserve existing endpoints,
+# capabilities, file limits and other settings. Do not add duplicate YAML keys.
+ocr:
+  # This selects the inline/base64 transport, NOT an Azure-hosted service.
+  # Do not use mistral_ocr (it requires a separate /files upload API).
+  strategy: "azure_mistral_ocr"
+  baseURL: "http://host.docker.internal:8000/v1"
+  apiKey: "${OCR_API_KEY}"
+  mistralModel: "local-tesseract"
+  allowedAddresses:
+    - "host.docker.internal:8000"
+
+fileConfig:
+  ocr:
+    supportedMimeTypes:
+      - '^application/pdf$'
+      - '^image/(png|jpeg|webp|gif|tiff|bmp)$'
+
+# Add "context" and "ocr" to endpoints.agents.capabilities if you have an
+# explicit capabilities list. Keep every existing capability and custom endpoint.
