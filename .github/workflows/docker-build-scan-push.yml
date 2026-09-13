@@ -1,0 +1,87 @@
+# Builds the gateway image, scans it with Trivy and Grype, and only pushes
+# to Docker Hub if neither scanner reports a Critical or High vulnerability.
+# A finding at either severity fails the job before the push step runs.
+#
+# Required repository configuration (Settings > Secrets and variables > Actions):
+#   Secrets:
+#     DOCKERHUB_USERNAME   Docker Hub username used to log in
+#     DOCKERHUB_TOKEN      Docker Hub access token (Account Settings > Security),
+#                          not your account password
+#   Variables:
+#     VERSION              Build version, e.g. "1.0.0". Required.
+#     ENVIRONMENT          Target environment, e.g. "prod" or "staging". Required.
+#                          The image is tagged "<VERSION>-<ENVIRONMENT>".
+#   Variables (optional):
+#     DOCKERHUB_REPOSITORY Full image path to push, e.g. "yourorg/protecto_librechat_gateway".
+#                          Defaults to "<DOCKERHUB_USERNAME>/protecto_librechat_gateway"
+#                          if unset.
+name: Build, Scan, and Push Docker Image
+
+on:
+  push:
+    branches:
+      - main
+
+env:
+  SCAN_IMAGE: protecto_librechat_gateway:scan
+
+jobs:
+  build-scan-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build image (local only, not pushed yet)
+        run: docker build --tag "${{ env.SCAN_IMAGE }}" .
+
+      - name: Scan with Trivy (fail on Critical/High)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ${{ env.SCAN_IMAGE }}
+          format: table
+          severity: CRITICAL,HIGH
+          exit-code: "1"
+
+      - name: Scan with Grype (fail on Critical/High)
+        uses: anchore/scan-action@v4
+        with:
+          image: ${{ env.SCAN_IMAGE }}
+          severity-cutoff: high
+          only-fixed: false
+          fail-build: true
+
+      - name: Resolve target image repository and tag
+        id: image
+        run: |
+          version="${{ vars.VERSION }}"
+          environment="${{ vars.ENVIRONMENT }}"
+          if [ -z "$version" ] || [ -z "$environment" ]; then
+            echo "::error::Set the VERSION and ENVIRONMENT repository variables (Settings > Secrets and variables > Actions > Variables) before pushing."
+            exit 1
+          fi
+
+          repo="${{ vars.DOCKERHUB_REPOSITORY }}"
+          if [ -z "$repo" ]; then
+            repo="${{ secrets.DOCKERHUB_USERNAME }}/protecto_librechat_gateway"
+          fi
+
+          echo "repository=$repo" >> "$GITHUB_OUTPUT"
+          echo "tag=${version}-${environment}" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Tag and push
+        run: |
+          repo="${{ steps.image.outputs.repository }}"
+          tag="${{ steps.image.outputs.tag }}"
+          docker tag "${{ env.SCAN_IMAGE }}" "$repo:$tag"
+          docker tag "${{ env.SCAN_IMAGE }}" "$repo:${{ github.sha }}"
+          docker push "$repo:$tag"
+          docker push "$repo:${{ github.sha }}"
