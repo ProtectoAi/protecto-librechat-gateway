@@ -117,6 +117,10 @@ LibreChat headers. The gateway reads them only from its own environment.
 
 ### 3. Start the gateway
 
+Choose one:
+
+**Option A — build the image locally**
+
 ```sh
 ./start.ksh
 ```
@@ -136,6 +140,50 @@ Stop it:
 
 ```sh
 ./stop.ksh
+```
+
+**Option B — pull the published public image**
+
+Skips building entirely by pulling the published image
+`onedpo/protecto_librechat_gateway:v0.0.1-prod` and running it with
+`compose.remote.yml`, which reads gateway settings from environment variables
+instead of `.env`:
+
+```sh
+cp .env.remote.example .env
+```
+
+Edit `.env` and set:
+
+```dotenv
+GATEWAY_IMAGE=onedpo/protecto_librechat_gateway:v0.0.1-prod
+```
+
+`compose.remote.yml` inlines every other gateway setting (Protecto
+connection, model catalog, async masking, OCR, RAG embeddings) directly in
+its `environment:` block — edit that file to set `PROTECTO_URL`,
+`PROTECTO_MASTER_TOKEN`, `PROTECTO_NAMESPACE`, and
+`GATEWAY_MODEL_PROVIDERS_MODELS` (and any other values from
+[Gateway configuration](#gateway-configuration) you need to change).
+
+Pull and start:
+
+```sh
+docker compose --file compose.remote.yml pull
+docker compose --file compose.remote.yml up --detach
+```
+
+Verify it:
+
+```sh
+curl --fail http://127.0.0.1:8000/health
+docker compose --file compose.remote.yml logs --follow
+```
+
+Stop it:
+
+```sh
+docker compose --file compose.remote.yml down
 ```
 
 ### 4. Point your LibreChat (official image) at the gateway
