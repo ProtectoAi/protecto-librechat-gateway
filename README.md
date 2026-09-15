@@ -147,13 +147,8 @@ Stop it:
 Skips building entirely by pulling the published image
 `onedpo/protecto_librechat_gateway:v0.0.1-prod` and running it with
 `compose.remote.yml`, which reads gateway settings from environment variables
-instead of `.env`:
 
-```sh
-cp .env.remote.example .env
-```
-
-Edit `.env` and set:
+Edit `compose.remote.yml` and set:
 
 ```dotenv
 GATEWAY_IMAGE=onedpo/protecto_librechat_gateway:v0.0.1-prod

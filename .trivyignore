@@ -1,0 +1,15 @@
+# Vulnerabilities intentionally suppressed from the CI scan gate.
+# Each entry must have a comment explaining why it's safe to ignore here -
+# see .claude/MEMORY.md ("Known wont-fix CVEs") for the full write-up.
+
+# tesseract-ocr 5.5.2-r0 (Alpine). No fixed release exists anywhere upstream
+# as of 2026-09 (checked Alpine edge: still 5.5.3-r0, which the CVEs say is
+# also affected) - these are not "upgrade available" findings.
+# Both require Tesseract to load an attacker-crafted .traineddata model file
+# to trigger (stack/heap overflow while parsing NORMPROTO / NT_SOFTMAX
+# layers). This gateway only ever loads the single trusted eng.traineddata
+# shipped by Alpine's tesseract-ocr-data-eng package - ocr.py/ocr_api.py
+# never accept a user-supplied model path or let request input choose which
+# .traineddata loads. Not reachable via the /v1/ocr endpoint.
+CVE-2026-88047
+CVE-2026-88048

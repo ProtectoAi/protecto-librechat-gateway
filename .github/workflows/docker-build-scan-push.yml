@@ -2,6 +2,10 @@
 # to Docker Hub if neither scanner reports a Critical or High vulnerability.
 # A finding at either severity fails the job before the push step runs.
 #
+# .trivyignore / .grype.yaml suppress specific CVE IDs that have no fix
+# available anywhere upstream and aren't reachable in this gateway - see the
+# comments in those files and .claude/MEMORY.md ("Known wont-fix CVEs").
+#
 # Required repository configuration (Settings > Secrets and variables > Actions):
 #   Secrets:
 #     DOCKERHUB_USERNAME   Docker Hub username used to log in
@@ -44,6 +48,7 @@ jobs:
           format: table
           severity: CRITICAL,HIGH
           exit-code: "1"
+          trivyignores: .trivyignore
 
       - name: Scan with Grype (fail on Critical/High)
         uses: anchore/scan-action@v7
@@ -52,6 +57,7 @@ jobs:
           severity-cutoff: high
           only-fixed: false
           fail-build: true
+          config: .grype.yaml
 
       - name: Resolve target image repository and tag
         id: image
