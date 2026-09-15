@@ -1,0 +1,13 @@
+# Grype config - suppresses specific vulnerability IDs from the CI scan gate.
+# Each entry must have a reason explaining why it's safe to ignore here -
+# see .claude/MEMORY.md ("Known wont-fix CVEs") for the full write-up.
+#
+# tesseract-ocr 5.5.2-r0 (Alpine). No fixed release exists anywhere upstream
+# as of 2026-09 (checked Alpine edge: still 5.5.3-r0, which the CVEs say is
+# also affected). Both require Tesseract to load an attacker-crafted
+# .traineddata model file to trigger; this gateway only ever loads the
+# single trusted eng.traineddata shipped by tesseract-ocr-data-eng and never
+# accepts a user-supplied model path - not reachable via /v1/ocr.
+ignore:
+  - vulnerability: CVE-2026-88047
+  - vulnerability: CVE-2026-88048
