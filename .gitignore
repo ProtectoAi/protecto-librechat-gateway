@@ -1,6 +1,11 @@
 # Local compose override with real credentials filled in - never commit this
 compose.local.yml
 
+# Kubernetes manifests with real credentials filled in - never commit these
+k8s-gateway.yaml
+k8s-librechat.yaml
+KUBERNETES_DEPLOYMENT.md
+
 # Python
 __pycache__/
 *.py[cod]
