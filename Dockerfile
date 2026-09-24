@@ -22,7 +22,7 @@ RUN wget -q https://download.osgeo.org/libtiff/tiff-4.7.2.tar.gz \
     && cd .. && rm -rf tiff-4.7.2*
 
 # ─── Runtime ────────────────────────────────────────────────────────────────
-FROM python:3.13-alpine AS runtime
+FROM python:3.14-alpine AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -69,8 +69,8 @@ RUN addgroup -S -g 10001 gateway \
 COPY requirements.txt ./
 RUN pip install --no-cache-dir --upgrade pip \
     && pip install --no-cache-dir --requirement requirements.txt \
-    && rm -rf /usr/local/lib/python3.13/site-packages/pip \
-              /usr/local/lib/python3.13/site-packages/pip-*.dist-info \
+    && rm -rf /usr/local/lib/python3.14/site-packages/pip \
+              /usr/local/lib/python3.14/site-packages/pip-*.dist-info \
     && rm -f /usr/local/bin/pip /usr/local/bin/pip3
 
 COPY --chown=gateway:gateway protecto_gateway ./protecto_gateway
