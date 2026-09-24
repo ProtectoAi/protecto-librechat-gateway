@@ -13,3 +13,23 @@
 # .traineddata loads. Not reachable via the /v1/ocr endpoint.
 CVE-2026-88047
 CVE-2026-88048
+
+# Same package, same trigger (crafted .traineddata model) and same
+# reasoning as above: out-of-bounds reads/writes while parsing a model's
+# GenericVector counts (88051), unicharset (88052) and inttemp (88053)
+# sections. Fixed on upstream main (56e09ca1, 2d04d640, 8b057468) but
+# unreleased; upstream advisories target 5.5.4. Remove all tesseract
+# entries once tesseract-ocr >= 5.5.4 is packaged in Alpine.
+CVE-2026-88051
+CVE-2026-88052
+CVE-2026-88053
+
+# zlib 1.3.2-r0 (Alpine). Heap overflow in gz_vacate() reached only via the
+# gzFile API: gzprintf()/gzvprintf() after a non-blocking gzwrite() stall.
+# Fixed on upstream develop (df84af25) but unreleased; Alpine edge is still
+# 1.3.2-r0. No binary or library in this image references
+# gzprintf/gzvprintf/gzwrite (only libz.so itself) - Python, Pillow, Poppler,
+# Tesseract, Leptonica and libtiff use only in-memory inflate/deflate - and
+# the gateway code imports neither zlib nor gzip. Remove once zlib > 1.3.2
+# is packaged in Alpine.
+CVE-2026-85091
