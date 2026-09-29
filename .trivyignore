@@ -11,7 +11,6 @@ CVE-2026-88048
 # the image builds tesseract from source with the upstream fixes backported.
 # See patches/README.md.
 
-# zlib CVE-2026-85091: heap overflow reachable only via the gzFile API
-# (gzprintf/gzvprintf), which nothing in this image calls. Fixed upstream but
-# unreleased. Left unsuppressed by an explicit decision - uncomment to suppress.
-# CVE-2026-85091
+# CVE-2026-85091 is absent for the same reason: the image builds zlib from
+# source with the upstream fix backported, since no distro ships a fixed
+# package. See patches/README.md.

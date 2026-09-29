@@ -1,5 +1,36 @@
 # syntax=docker/dockerfile:1.4
 
+# Alpine's zlib 1.3.2-r0 has CVE-2026-85091, a heap overflow in non-blocking
+# gzwrite. No Alpine branch has a fixed package - 3.20 through edge all ship
+# 1.3.2-r0 - and no distro has backported it, but the upstream fix is a
+# four-line change that applies cleanly to the 1.3.2 release tarball. See
+# patches/README.md.
+#
+# Same base as the runtime stage for the same reason as tesseract below: libz is
+# loaded by CPython's zlib extension, so a musl mismatch would surface only at
+# run time.
+FROM python:3.14-alpine AS zlib_builder
+
+RUN apk update && apk upgrade --no-cache \
+    && apk add --no-cache build-base wget tar git
+
+COPY patches/zlib-1.3.2-cve-2026-85091.patch /tmp/zlib-cve-fix.patch
+
+# Installed under DESTDIR, not over the builder's own /usr/lib: a plain
+# "make install" overwrites the very libz.so.1.3.2 that the running cp and chmod
+# have mapped, and segfaults mid-install. libtiff and libtesseract can be
+# installed in place only because nothing in the toolchain links them.
+RUN wget -q https://github.com/madler/zlib/archive/refs/tags/v1.3.2.tar.gz \
+    && tar -xzf v1.3.2.tar.gz \
+    && cd zlib-1.3.2 \
+    && git apply --check /tmp/zlib-cve-fix.patch \
+    && git apply /tmp/zlib-cve-fix.patch \
+    && ./configure --prefix=/usr --libdir=/usr/lib --sharedlibdir=/usr/lib \
+    && make -j"$(nproc)" \
+    && make install DESTDIR=/out \
+    && strip /out/usr/lib/libz.so.1.3.2 \
+    && cd .. && rm -rf zlib-1.3.2 v1.3.2.tar.gz
+
 # Alpine's tiff has unpatched CVE-2023-52356 / CVE-2026-4775 with no newer apk
 # package. Fixed by libtiff 4.7.2, and everything here only dynamically links
 # libtiff.so.6, so a drop-in replacement is enough.
@@ -72,11 +103,10 @@ RUN apk update \
     && apk upgrade --no-cache \
     && apk add --no-cache poppler-utils leptonica libstdc++ libgomp
 
-# Drop in the patched libtiff (same SONAME) and strip the apk-db record too:
-# scanners read the apk database, not the files on disk.
-RUN rm -f /usr/lib/libtiff.so.6 /usr/lib/libtiff.so.6.2.0
-COPY --from=tiff_builder /usr/lib/libtiff.so.6.* /usr/lib/
-RUN cd /usr/lib && ln -sf libtiff.so.6.*.* libtiff.so.6
+# Scanners read the apk database, not the files on disk, so each patched drop-in
+# below also needs its apk-db record removed. Nothing may run apk after that:
+# the edits leave other packages' "so:" dependencies pointing at records that no
+# longer exist.
 COPY <<'EOF' /tmp/drop_apk_pkg.py
 import sys
 
@@ -93,7 +123,22 @@ with open(path, "w") as f:
     f.write("\n\n".join(kept))
 print(f"removed apk db record for {name}")
 EOF
-RUN python3 /tmp/drop_apk_pkg.py tiff && rm /tmp/drop_apk_pkg.py
+
+# Drop in the patched libz (same SONAME, libz.so.1). Wider blast radius than
+# libtiff: the consumers are CPython's zlib extension and the whole OCR path -
+# poppler's pdftoppm, tesseract, leptonica.
+RUN rm -f /usr/lib/libz.so.1 /usr/lib/libz.so.1.3.2
+COPY --from=zlib_builder /out/usr/lib/libz.so.1.3.2 /usr/lib/
+RUN ln -sf libz.so.1.3.2 /usr/lib/libz.so.1
+
+# Drop in the patched libtiff (same SONAME).
+RUN rm -f /usr/lib/libtiff.so.6 /usr/lib/libtiff.so.6.2.0
+COPY --from=tiff_builder /usr/lib/libtiff.so.6.* /usr/lib/
+RUN cd /usr/lib && ln -sf libtiff.so.6.*.* libtiff.so.6
+
+RUN python3 /tmp/drop_apk_pkg.py zlib \
+    && python3 /tmp/drop_apk_pkg.py tiff \
+    && rm /tmp/drop_apk_pkg.py
 
 COPY --from=tesseract_builder /usr/bin/tesseract /usr/bin/tesseract
 COPY --from=tesseract_builder /usr/lib/libtesseract.so.5* /usr/lib/
@@ -102,9 +147,20 @@ ENV TESSDATA_PREFIX=/usr/share/tessdata
 
 # Fail the build, not the container. The size check catches a swap to the much
 # smaller tessdata_fast model, which would quietly change OCR accuracy.
-RUN if ldd /usr/bin/tesseract | grep -q "not found"; then \
-        ldd /usr/bin/tesseract; echo "FATAL: unresolved shared libraries"; exit 1; \
-    fi \
+RUN for bin in /usr/bin/tesseract /usr/bin/pdftoppm; do \
+        if ldd "$bin" | grep -q "not found"; then \
+            ldd "$bin"; echo "FATAL: unresolved shared libraries in $bin"; exit 1; \
+        fi; \
+    done \
+    && { python3 -c "\
+import gzip, io, zlib; \
+assert zlib.ZLIB_RUNTIME_VERSION == '1.3.2', zlib.ZLIB_RUNTIME_VERSION; \
+d = bytes(range(256)) * 512; \
+assert zlib.decompress(zlib.compress(d, 9)) == d; \
+b = io.BytesIO(); \
+g = gzip.GzipFile(fileobj=b, mode='wb'); g.write(d); g.close(); \
+assert gzip.GzipFile(fileobj=io.BytesIO(b.getvalue())).read() == d" \
+         || { echo "FATAL: patched libz failed a compress/decompress round-trip"; exit 1; }; } \
     && { tesseract --version | head -1 | grep -q 'tesseract 5.5.3' \
          || { tesseract --version; echo "FATAL: unexpected tesseract version"; exit 1; }; } \
     && { tesseract --list-langs 2>&1 | grep -qx eng \
