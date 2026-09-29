@@ -315,7 +315,8 @@ Provider API keys are passed transiently from LibreChat:
 
 - OpenAI requests require `X-OpenAI-API-Key`.
 - Gemini requests require `X-Gemini-API-Key`.
-- Chat requests require `X-User-Username` for the per-user Protecto token.
+- Chat requests require `X-User-Email` for the per-user Protecto token. The
+  value is lowercased and trimmed before it is used as the Protecto user id.
 - `X-Conversation-ID` and `X-Message-ID` provide request context but do not
   create a gateway-side conversation cache.
 

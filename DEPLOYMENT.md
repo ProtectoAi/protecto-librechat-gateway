@@ -17,14 +17,15 @@ For optional local PDF/image OCR and the LibreChat configuration, see
 
 ## 2. Publish from the laptop
 
-Run these commands from `protecto_gateway_source`. Replace the namespace and
-version with the enterprise organization and release version.
+Run these commands from `protecto_gateway_source`. Replace the namespace with
+the enterprise organization. The version is read from the `VERSION` file at the
+repository root, which is the same source the CI pipeline uses.
 
 ```sh
 docker login --username LAPTOP_DOCKER_USERNAME
 
 DOCKER_NAMESPACE=YOUR_ENTERPRISE_ORGANIZATION
-IMAGE_VERSION=1.0.0
+IMAGE_VERSION="$(tr -d '\r\n' < VERSION)"
 
 docker buildx build \
   --platform linux/amd64,linux/arm64 \

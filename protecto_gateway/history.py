@@ -590,7 +590,8 @@ async def prepare_request(
     # ========================================================
     # Private Protecto service configuration
     # ========================================================
-    logged_in_user = request_headers.get("x-user-username")
+    # Logged-in user email is used as the Protecto user id.
+    logged_in_user = request_headers.get("x-user-email", "").strip().lower()
 
     try:
         (
@@ -609,7 +610,7 @@ async def prepare_request(
             detail="Protecto service is not configured in the gateway",
         ) from exc
     if not logged_in_user:
-        raise HTTPException(status_code=400, detail="Missing x-user-username")
+        raise HTTPException(status_code=400, detail="Missing x-user-email")
 
     # ========================================================
     # Provider API key

@@ -6,13 +6,17 @@
 # available anywhere upstream and aren't reachable in this gateway - see the
 # comments in those files and .claude/MEMORY.md ("Known wont-fix CVEs").
 #
+# The published version comes from the VERSION file at the repository root, not
+# from a repository variable, so bumping it is part of the pull request diff.
+# The job refuses to push a tag that already exists on Docker Hub, so a
+# forgotten bump fails the build instead of overwriting the previous image.
+#
 # Required repository configuration (Settings > Secrets and variables > Actions):
 #   Secrets:
 #     DOCKERHUB_USERNAME   Docker Hub username used to log in
 #     DOCKERHUB_TOKEN      Docker Hub access token (Account Settings > Security),
 #                          not your account password
 #   Variables:
-#     VERSION              Build version, e.g. "1.0.0". Required.
 #     ENVIRONMENT          Target environment, e.g. "prod" or "staging". Required.
 #                          The image is tagged "<VERSION>-<ENVIRONMENT>".
 #   Variables (optional):
@@ -25,9 +29,17 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch:
 
 env:
   SCAN_IMAGE: protecto_librechat_gateway:scan
+
+# Serialize publishes. Two runs could otherwise both pass the duplicate-tag
+# check and then push the same tag, which is the overwrite this guards against.
+# Queue the second run rather than cancelling it, so no commit is skipped.
+concurrency:
+  group: gateway-image-publish
+  cancel-in-progress: false
 
 jobs:
   build-scan-push:
@@ -61,21 +73,45 @@ jobs:
 
       - name: Resolve target image repository and tag
         id: image
+        env:
+          ENVIRONMENT: ${{ vars.ENVIRONMENT }}
+          DOCKERHUB_REPOSITORY: ${{ vars.DOCKERHUB_REPOSITORY }}
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
         run: |
-          version="${{ vars.VERSION }}"
-          environment="${{ vars.ENVIRONMENT }}"
-          if [ -z "$version" ] || [ -z "$environment" ]; then
-            echo "::error::Set the VERSION and ENVIRONMENT repository variables (Settings > Secrets and variables > Actions > Variables) before pushing."
+          set -euo pipefail
+
+          if [ ! -f VERSION ]; then
+            echo "::error::VERSION file not found at the repository root. It must contain the release version, e.g. 1.0.1."
             exit 1
           fi
 
-          repo="${{ vars.DOCKERHUB_REPOSITORY }}"
+          # Strip only line endings. Using [:space:] here would silently
+          # collapse a malformed "1. 0.1" into a valid-looking "1.0.1"
+          # instead of failing the format check below.
+          version="$(tr -d '\r\n' < VERSION)"
+
+          if [ -z "$version" ]; then
+            echo "::error::VERSION file is empty. It must contain the release version, e.g. 1.0.1."
+            exit 1
+          fi
+
+          if ! printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$'; then
+            echo "::error::VERSION file contains '$version', which is not a valid version. Expected MAJOR.MINOR.PATCH with an optional -suffix, e.g. 1.0.1 or 1.0.1-rc.1."
+            exit 1
+          fi
+
+          if [ -z "$ENVIRONMENT" ]; then
+            echo "::error::Set the ENVIRONMENT repository variable (Settings > Secrets and variables > Actions > Variables) before pushing."
+            exit 1
+          fi
+
+          repo="$DOCKERHUB_REPOSITORY"
           if [ -z "$repo" ]; then
-            repo="${{ secrets.DOCKERHUB_USERNAME }}/protecto_librechat_gateway"
+            repo="$DOCKERHUB_USERNAME/protecto_librechat_gateway"
           fi
 
           echo "repository=$repo" >> "$GITHUB_OUTPUT"
-          echo "tag=${version}-${environment}" >> "$GITHUB_OUTPUT"
+          echo "tag=${version}-${ENVIRONMENT}" >> "$GITHUB_OUTPUT"
 
       - name: Log in to Docker Hub
         uses: docker/login-action@v4
@@ -83,8 +119,19 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
+      - name: Fail if the image tag is already published
+        env:
+          TARGET: ${{ steps.image.outputs.repository }}:${{ steps.image.outputs.tag }}
+        run: |
+          if docker manifest inspect "$TARGET" > /dev/null 2>&1; then
+            echo "::error::$TARGET is already published on Docker Hub. Bump the VERSION file at the repository root instead of overwriting the existing image."
+            exit 1
+          fi
+          echo "$TARGET is not published yet; proceeding with the push."
+
       - name: Tag and push
         run: |
+          set -euo pipefail
           repo="${{ steps.image.outputs.repository }}"
           tag="${{ steps.image.outputs.tag }}"
           docker tag "${{ env.SCAN_IMAGE }}" "$repo:$tag"
