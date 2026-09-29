@@ -1,31 +1,18 @@
-# Grype config - suppresses specific vulnerability IDs from the CI scan gate.
-# Each entry must have a reason explaining why it's safe to ignore here -
-# see .claude/MEMORY.md ("Known wont-fix CVEs") for the full write-up.
+# Suppressed from the CI scan gate. Each entry needs a reason - keep these in
+# sync with .trivyignore.
 #
-# tesseract-ocr 5.5.2-r0 (Alpine). No fixed release exists anywhere upstream
-# as of 2026-09 (checked Alpine edge: still 5.5.3-r0, which the CVEs say is
-# also affected). All require Tesseract to load an attacker-crafted
-# .traineddata model file to trigger; this gateway only ever loads the
-# single trusted eng.traineddata shipped by tesseract-ocr-data-eng and never
-# accepts a user-supplied model path - not reachable via /v1/ocr.
+# Tesseract CVE-2026-88047 / CVE-2026-88048: no fix available upstream (5.5.3 is
+# the latest tag and is also affected). Both need Tesseract to load an
+# attacker-crafted .traineddata, and the gateway never lets request input choose
+# a model path.
 #
-# 88051 (GenericVector::read), 88052 (UNICHARSET::load_via_fgets) and
-# 88053 (Classify::ReadIntTemplates) are fixed on upstream main (56e09ca1,
-# 2d04d640, 8b057468) but unreleased; upstream advisories target 5.5.4.
-# Remove all of these once tesseract-ocr >= 5.5.4 is packaged in Alpine.
+# CVE-2026-88051/88052/88053 are absent because they are fixed, not suppressed:
+# the image builds tesseract from source with the upstream fixes backported.
+# See patches/README.md.
 #
-# zlib 1.3.2-r0 (Alpine). CVE-2026-85091 is a heap overflow in gz_vacate()
-# reached only via the gzFile API: gzprintf()/gzvprintf() after a
-# non-blocking gzwrite() stall. Fixed on upstream develop (df84af25) but
-# unreleased; Alpine edge is still 1.3.2-r0. No binary or library in this
-# image references gzprintf/gzvprintf/gzwrite (only libz.so itself) - Python,
-# Pillow, Poppler, Tesseract, Leptonica and libtiff use only in-memory
-# inflate/deflate - and the gateway code imports neither zlib nor gzip.
-# Remove once zlib > 1.3.2 is packaged in Alpine.
+# CVE-2026-85091 is absent for the same reason: the image builds zlib from
+# source with the upstream fix backported, since no distro ships a fixed
+# package. See patches/README.md.
 ignore:
   - vulnerability: CVE-2026-88047
   - vulnerability: CVE-2026-88048
-  - vulnerability: CVE-2026-88051
-  - vulnerability: CVE-2026-88052
-  - vulnerability: CVE-2026-88053
-  - vulnerability: CVE-2026-85091
