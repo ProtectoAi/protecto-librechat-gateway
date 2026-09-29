@@ -19,9 +19,12 @@ from PIL import Image, ImageOps, UnidentifiedImageError
 from .config import OCR_SETTINGS, OCRSettings, logger
 
 
+# Keys are the accepted upload MIME types; values are every Pillow format that
+# legitimately decodes from one. Phone cameras write multi-picture JPEGs that
+# Pillow reports as MPO, so "JPEG" alone would reject ordinary photos.
 IMAGE_FORMATS = {
-    "image/png": "PNG", "image/jpeg": "JPEG", "image/webp": "WEBP",
-    "image/gif": "GIF", "image/tiff": "TIFF", "image/bmp": "BMP",
+    "image/png": {"PNG"}, "image/jpeg": {"JPEG", "MPO"}, "image/webp": {"WEBP"},
+    "image/gif": {"GIF"}, "image/tiff": {"TIFF"}, "image/bmp": {"BMP"},
 }
 
 
@@ -124,9 +127,10 @@ def _image_pages(
         with warnings.catch_warnings():
             warnings.simplefilter("error", Image.DecompressionBombWarning)
             with Image.open(path) as image:
-                if image.format != IMAGE_FORMATS[mime_type]:
+                if image.format not in IMAGE_FORMATS[mime_type]:
                     raise OCRError("Image content does not match its declared file type.")
-                count = getattr(image, "n_frames", 1)
+                # An MPO's extra frames are alternate views of one photo, not pages.
+                count = 1 if image.format == "MPO" else getattr(image, "n_frames", 1)
                 if count > settings.max_pages:
                     raise OCRError("Image exceeds the OCR frame/page limit.", 413)
                 for index in range(count):

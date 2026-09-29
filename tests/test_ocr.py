@@ -153,6 +153,21 @@ class OCREngineTests(unittest.TestCase):
             with patch("protecto_gateway.ocr._image_text", side_effect=["First", "Second"]):
                 self.assertEqual(len(_image_pages(path, "image/tiff", path.parent, OCRSettings())), 2)
 
+    def test_multi_picture_jpeg_is_one_page_and_spoofing_still_rejected(self):
+        # Phone cameras write multi-picture JPEGs that Pillow reports as MPO.
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "image"
+            with Image.new("RGB", (20, 20), "white") as first, Image.new("RGB", (20, 20), "black") as second:
+                first.save(path, format="MPO", save_all=True, append_images=[second])
+            with Image.open(path) as image:
+                self.assertEqual(image.format, "MPO")
+            with patch("protecto_gateway.ocr._image_text", side_effect=["Photo text"]) as ocr:
+                pages = _image_pages(path, "image/jpeg", path.parent, OCRSettings())
+            self.assertEqual([page["markdown"] for page in pages], ["Photo text"])
+            ocr.assert_called_once()
+            with self.assertRaises(OCRError):
+                _image_pages(path, "image/png", path.parent, OCRSettings())
+
     def test_subprocess_errors_do_not_expose_diagnostics(self):
         errors = (FileNotFoundError("secret"), subprocess.TimeoutExpired("secret", 1))
         with tempfile.TemporaryDirectory() as directory:
