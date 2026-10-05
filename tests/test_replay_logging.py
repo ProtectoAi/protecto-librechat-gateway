@@ -3,6 +3,7 @@ import logging
 import unittest
 
 from protecto_gateway.history import (
+    build_masked_history,
     log_librechat_replay,
     log_masked_replay_payload,
 )
@@ -107,6 +108,60 @@ class ReplayLoggingTests(unittest.TestCase):
         self.assertIn('"role":"unknown"', line)
         self.assertIn('"content_type":"dict"', line)
         self.assertIn('"content_chars":0', line)
+
+    def _capture_build(self, raw_messages):
+        from protecto_gateway.config import logger
+
+        capture = _Capture()
+        logger.addHandler(capture)
+        try:
+            build_masked_history(raw_messages)
+        finally:
+            logger.removeHandler(capture)
+        return capture.records
+
+    def test_logs_replay_anchor_decision(self):
+        records = self._capture_build([
+            {"role": "user", "content": "Check this text"},
+            {"role": "assistant", "content": None, "tool_calls": [{
+                "id": "call-1",
+                "type": "function",
+                "function": {"name": "skill", "arguments": "{}"},
+            }]},
+            {"role": "tool", "tool_call_id": "call-1", "content": "loaded"},
+            {"role": "user", "content": "Injected instructions"},
+        ])
+
+        line = next(r for r in records if r.startswith("[REPLAY ANCHOR]"))
+        self.assertIn("source=artifactless-scan", line)
+        self.assertIn("raw_tool_results=1", line)
+        self.assertIn("pending_tool_results=1", line)
+        self.assertFalse(
+            [r for r in records if "[REPLAY ANCHOR DROPPED TOOL CHAIN]" in r]
+        )
+
+    def test_warns_when_anchor_drops_every_tool_result(self):
+        """
+        A completed assistant text turn closes the loop, so the earlier tool
+        results fall outside the replay window. That is correct here, but it is
+        the exact shape that broke the skill loop, so it must be visible.
+        """
+        records = self._capture_build([
+            {"role": "user", "content": "Check this text"},
+            {"role": "assistant", "content": None, "tool_calls": [{
+                "id": "call-1",
+                "type": "function",
+                "function": {"name": "skill", "arguments": "{}"},
+            }]},
+            {"role": "tool", "tool_call_id": "call-1", "content": "loaded"},
+            {"role": "assistant", "content": "Here is the answer"},
+            {"role": "user", "content": "Next question"},
+        ])
+
+        line = next(
+            r for r in records if r.startswith("[REPLAY ANCHOR DROPPED TOOL CHAIN]")
+        )
+        self.assertIn("raw_tool_results=1", line)
 
 
 if __name__ == "__main__":
