@@ -186,6 +186,75 @@ def log_masked_replay_payload(masked_messages: list[dict[str, Any]]) -> None:
     )
 
 
+def _assistant_has_tool_calls(message: dict[str, Any]) -> bool:
+    """A tool-call turn is never a turn boundary: it carries no artifact."""
+    tool_calls = message.get("tool_calls")
+    return isinstance(tool_calls, list) and bool(tool_calls)
+
+
+def _has_visible_text(content: Any) -> bool:
+    """
+    Tolerant text check used only to pick a replay anchor.
+
+    Deliberately never raises: _message_text_content rejects unknown content
+    with a 400, and failing a whole request while merely choosing where to
+    start the replay would be worse than replaying a little too much.
+    """
+    if isinstance(content, str):
+        return bool(content.strip())
+    if isinstance(content, list):
+        return any(
+            (isinstance(part, str) and part.strip())
+            or (
+                isinstance(part, dict)
+                and part.get("type") in _TEXT_CONTENT_TYPES
+                and isinstance(part.get("text"), str)
+                and part["text"].strip()
+            )
+            for part in content
+        )
+    return False
+
+
+def _artifactless_pending_start(raw_messages: list[dict[str, Any]]) -> int:
+    """
+    Choose where replay starts when no behind-the-scenes artifact exists.
+
+    Replay begins at the start of the turn that is still open. A turn is closed
+    only by an assistant TEXT message - no tool_calls, non-empty content - that
+    is followed by a later user message. A tool-call turn deliberately carries
+    neither content nor an artifact, so it must never end the replay window:
+    anchoring on it drops the assistant tool_calls and tool results the model
+    needs to see that it has already called the tool, and the model then repeats
+    the same call forever.
+
+    Requiring a later user message keeps the original intent of this fallback -
+    do not replay the whole raw history after a turn that ended without an
+    artifact (e.g. a rejected provider upload) - while guaranteeing the pending
+    region always still contains a real prompt.
+    """
+    last_user_idx = next(
+        (
+            i
+            for i in range(len(raw_messages) - 1, -1, -1)
+            if raw_messages[i].get("role") == "user"
+        ),
+        -1,
+    )
+    if last_user_idx < 0:
+        return 0
+
+    for i in range(last_user_idx - 1, -1, -1):
+        message = raw_messages[i]
+        if message.get("role") != "assistant":
+            continue
+        if _assistant_has_tool_calls(message):
+            continue
+        if _has_visible_text(message.get("content")):
+            return i + 1
+    return 0
+
+
 def build_masked_history(
     raw_messages: list[dict[str, Any]],
 ) -> tuple[list[dict[str, Any]], dict[str, str], list[dict[str, Any]]]:
@@ -215,20 +284,16 @@ def build_masked_history(
     if last_artifact_idx < 0:
         # If an earlier turn ended before an artifact could be created (for
         # example, an unsupported provider upload), do not replay the whole
-        # raw LibreChat history. Keep only the latest user turn and anything
-        # after it, such as assistant tool calls and tool results.
-        pending_start_idx = next(
-            (
-                i
-                for i in range(len(raw_messages) - 1, -1, -1)
-                if raw_messages[i].get("role") == "user"
-            ),
-            0,
-        )
+        # raw LibreChat history. Start at the still-open turn, which keeps the
+        # current prompt together with the assistant tool calls and tool
+        # results that belong to it.
+        pending_start_idx = _artifactless_pending_start(raw_messages)
 
     masked_messages: list[dict[str, Any]] = []
     token_map: dict[str, str] = {}
     pending: list[dict[str, Any]] = []
+    pending_tool_call_ids: set[str] = set()
+    orphaned_tool_results = 0
     artifact_messages: list[dict[str, Any]] = []
     artifact_instructions: list[dict[str, str]] = []
     live_instructions: list[dict[str, Any]] = []
@@ -288,7 +353,27 @@ def build_masked_history(
             continue
 
         # ---- PENDING region: needs live masking ----
-        if role in {"user", "assistant", "tool"}:
+        if role == "user":
+            pending.append(msg)
+        elif role == "assistant":
+            for call in msg.get("tool_calls") or []:
+                if isinstance(call, dict) and call.get("id"):
+                    pending_tool_call_ids.add(call["id"])
+            pending.append(msg)
+        elif role == "tool":
+            # A tool result whose assistant tool_call is not in the pending
+            # region cannot be replayed: artifacts never store tool_calls, so
+            # the pairing is unrecoverable. Providers reject an unpaired tool
+            # result outright, so drop it rather than send a 400.
+            call_id = msg.get("tool_call_id")
+            if call_id not in pending_tool_call_ids:
+                orphaned_tool_results += 1
+                logger.warning(
+                    "[REPLAY ORPHAN TOOL DROPPED] index=%d has_tool_call_id=%s",
+                    i,
+                    bool(call_id),
+                )
+                continue
             pending.append(msg)
 
     # Reuse artifact instructions only when the live copies are absent or are
@@ -327,13 +412,43 @@ def build_masked_history(
 
     logger.info(
         "[ARTIFACT HISTORY REBUILT] artifacts=%d messages=%d roles=%s "
-        "masked_tokens=%d pending=%d",
+        "masked_tokens=%d pending=%d pending_start=%d",
         artifact_count,
         len(artifact_messages),
         [message["role"] for message in artifact_messages],
         len(token_map),
         len(pending),
+        pending_start_idx,
     )
+
+    # Counts and indices only - never message content.
+    raw_tool_results = sum(
+        1 for message in raw_messages if message.get("role") == "tool"
+    )
+    pending_tool_results = sum(
+        1 for message in pending if message.get("role") == "tool"
+    )
+    logger.info(
+        "[REPLAY ANCHOR] total=%d last_artifact_idx=%d pending_start_idx=%d "
+        "source=%s raw_tool_results=%d pending_tool_results=%d "
+        "orphaned_tool_results=%d",
+        len(raw_messages),
+        last_artifact_idx,
+        pending_start_idx,
+        "artifact" if last_artifact_idx >= 0 else "artifactless-scan",
+        raw_tool_results,
+        pending_tool_results,
+        orphaned_tool_results,
+    )
+    if raw_tool_results and not pending_tool_results:
+        # The signature of the skill-loop bug: tool results came in, none went
+        # out, so the model cannot tell it has already called the tool.
+        logger.warning(
+            "[REPLAY ANCHOR DROPPED TOOL CHAIN] raw_tool_results=%d "
+            "pending_start_idx=%d - provider will not see any tool result",
+            raw_tool_results,
+            pending_start_idx,
+        )
     logger.info(
         "[ARTIFACT HISTORY REBUILT PAYLOAD] %s",
         json.dumps(artifact_messages, ensure_ascii=False, separators=(",", ":")),

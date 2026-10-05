@@ -330,6 +330,50 @@ class ArtifactTests(unittest.TestCase):
 
         self.assertEqual(extract_behind_scenes_data(artifact), data)
 
+    def test_artifact_records_the_prompt_that_opened_the_turn(self):
+        """
+        During a tool/skill loop LibreChat injects extra user messages after
+        each tool result. The artifact must record the prompt the person
+        actually sent, not the trailing injected text, or the next turn
+        replays the wrong question.
+        """
+        masked_messages = [
+            {"role": "user", "content": "Check <EMAIL>person-1</EMAIL> for PII"},
+            {"role": "assistant", "content": None, "tool_calls": [{
+                "id": "call-1",
+                "type": "function",
+                "function": {"name": "skill", "arguments": "{}"},
+            }]},
+            {"role": "tool", "tool_call_id": "call-1", "content": "skill loaded"},
+            {"role": "user", "content": "Injected skill instructions"},
+        ]
+
+        artifact = build_behind_scenes_artifact(
+            masked_messages=masked_messages,
+            token_map={"person-1": "private@example.com"},
+            assistant_raw="Found one email address",
+        )
+
+        data = extract_behind_scenes_data(artifact)
+        self.assertEqual(data["user"], "Check <EMAIL>person-1</EMAIL> for PII")
+
+    def test_artifact_still_records_last_user_of_a_plain_multi_turn_history(self):
+        """An assistant text message closes the previous turn."""
+        masked_messages = [
+            {"role": "user", "content": "First question"},
+            {"role": "assistant", "content": "First answer"},
+            {"role": "user", "content": "Second question"},
+        ]
+
+        artifact = build_behind_scenes_artifact(
+            masked_messages=masked_messages,
+            token_map={},
+            assistant_raw="Second answer",
+        )
+
+        data = extract_behind_scenes_data(artifact)
+        self.assertEqual(data["user"], "Second question")
+
 
 if __name__ == "__main__":
     unittest.main()

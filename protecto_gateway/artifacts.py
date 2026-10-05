@@ -197,10 +197,26 @@ def build_behind_scenes_artifact(
     Only ever attached to a NORMAL text turn. A tool-call turn deliberately
     carries no content at all (see stream_and_unmask_generator).
     """
+    # The turn's prompt is the user message that OPENED the turn, not the last
+    # one. During a tool/skill loop LibreChat injects extra user messages after
+    # each tool result, so the trailing user message is injected text rather
+    # than what the person asked. Walk back across the contiguous run of tool
+    # results, assistant tool_calls and user messages that make up this turn,
+    # and keep the earliest user message in it.
     last_user = ""
     for msg in reversed(masked_messages):
-        if msg.get("role") == "user":
+        role = msg.get("role")
+        if role == "user":
             last_user = msg.get("content", "")
+            continue
+        if role == "tool":
+            continue
+        if role == "assistant" and msg.get("tool_calls"):
+            continue
+        if role in {"system", "developer"}:
+            continue
+        if last_user:
+            # An assistant TEXT message closes the previous turn.
             break
     tool_results = []
     for msg in masked_messages:
